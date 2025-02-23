@@ -122,14 +122,14 @@ const CustomNode: React.FC<{ data: NodeData }> = React.memo(({ data }) => (
 
 CustomNode.displayName = 'CustomNode';
 
-const nodeTypes = {
-  default: CustomNode,
-} as const;
-
 const KnowledgeGraph: React.FC = () => {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<NodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge<any>>([]);
   const [loading, setLoading] = useState<boolean>(true);
+
+  const nodeTypes = {
+    default: CustomNode,
+  } as const;
 
   const containerStyle: React.CSSProperties = {
     width: '100vw',
@@ -198,49 +198,61 @@ const KnowledgeGraph: React.FC = () => {
     const fetchGraph = async () => {
       try {
         console.log('Fetching all node IDs...');
-        const nodesResponse = await fetch('/graphs/nodes', {
+        const nodesResponse = await fetch('/graphs/nodes?player=manhthd', {
           headers: {
             Accept: 'application/json',
             'Content-Type': 'application/json',
           },
           credentials: 'include',
         });
-        const nodeIdsData = await nodesResponse.json();
-        
+        const nodeIds = await nodesResponse.json();
+        console.log('Raw response from nodes endpoint:', nodeIds);
+
         console.log('Fetching connections for each node...');
-        const connectionPromises = nodeIdsData.id.map(async (nodeId: string) => {
-          const response = await fetch(`/graphs/${nodeId}/connections`, {
-            headers: {
-              Accept: 'application/json',
-              'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-          });
-          return response.json();
+        const connectionPromises = nodeIds.map(async (nodeId: string) => {
+          try {
+            const response = await fetch(`/graphs/${nodeId}/connections`, {
+              headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+              },
+              credentials: 'include',
+            });
+            return await response.json();
+          } catch (error) {
+            console.error(`Error fetching connections for node ${nodeId}:`, error);
+            return null;
+          }
         });
 
-        const connectionsData = await Promise.all(connectionPromises);
+        const connectionsData = (await Promise.all(connectionPromises)).filter(Boolean);
 
         // Process all connection data to build complete graph
         const allNodes = new Map<string, ForceNodeData>();
         const edgeMap = new Map<string, InputEdge>();
 
         connectionsData.forEach(data => {
+          if (!data) return;
+
           // Add this node and its neighbors to the nodes map
           if (data.this) {
             allNodes.set(data.this.id, data.this);
           }
-          data.neighbors?.forEach((neighbor: ForceNodeData) => {
-            allNodes.set(neighbor.id, neighbor);
-          });
+          if (Array.isArray(data.neighbors)) {
+            data.neighbors.forEach((neighbor: ForceNodeData) => {
+              allNodes.set(neighbor.id, neighbor);
+            });
+          }
 
           // Add edges
-          data.edges?.forEach((edge: InputEdge) => {
-            const edgeKey = `${edge.source}-${edge.target}`;
-            if (!edgeMap.has(edgeKey)) {
-              edgeMap.set(edgeKey, edge);
-            }
-          });
+          if (Array.isArray(data.edges)) {
+            data.edges.forEach((edge: InputEdge) => {
+              const edgeKey = `${edge.source}-${edge.target}`;
+              if (!edgeMap.has(edgeKey)) {
+                edgeMap.set(edgeKey, edge);
+              }
+            });
+          }
         });
 
         const graphData: GraphData = {
@@ -248,7 +260,7 @@ const KnowledgeGraph: React.FC = () => {
           edges: Array.from(edgeMap.values())
         };
 
-        console.log(`Found ${graphData.nodes.length} nodes and ${graphData.edges.length} edges`);
+        console.log('Processed graph data:', graphData);
         applyForceLayout(graphData);
       } catch (error) {
         console.error('Error fetching graph data:', error);
