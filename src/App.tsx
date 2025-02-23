@@ -197,7 +197,7 @@ const KnowledgeGraph: React.FC = () => {
   useEffect(() => {
     const fetchGraph = async () => {
       try {
-        console.log('Fetching all nodes...');
+        console.log('Fetching all node IDs...');
         const nodesResponse = await fetch('/graphs/nodes', {
           headers: {
             Accept: 'application/json',
@@ -205,11 +205,11 @@ const KnowledgeGraph: React.FC = () => {
           },
           credentials: 'include',
         });
-        const nodesData = await nodesResponse.json();
-
+        const nodeIdsData = await nodesResponse.json();
+        
         console.log('Fetching connections for each node...');
-        const edgePromises = nodesData.nodes.map(async (node: ForceNodeData) => {
-          const response = await fetch(`/graphs/${node.id}/connections`, {
+        const connectionPromises = nodeIdsData.nodes.map(async (nodeId: string) => {
+          const response = await fetch(`/graphs/${nodeId}/connections`, {
             headers: {
               Accept: 'application/json',
               'Content-Type': 'application/json',
@@ -219,11 +219,23 @@ const KnowledgeGraph: React.FC = () => {
           return response.json();
         });
 
-        const connectionsData = await Promise.all(edgePromises);
+        const connectionsData = await Promise.all(connectionPromises);
 
+        // Process all connection data to build complete graph
+        const allNodes = new Map<string, ForceNodeData>();
         const edgeMap = new Map<string, InputEdge>();
+
         connectionsData.forEach(data => {
-          data.edges.forEach((edge: InputEdge) => {
+          // Add this node and its neighbors to the nodes map
+          if (data.this) {
+            allNodes.set(data.this.id, data.this);
+          }
+          data.neighbors?.forEach((neighbor: ForceNodeData) => {
+            allNodes.set(neighbor.id, neighbor);
+          });
+
+          // Add edges
+          data.edges?.forEach((edge: InputEdge) => {
             const edgeKey = `${edge.source}-${edge.target}`;
             if (!edgeMap.has(edgeKey)) {
               edgeMap.set(edgeKey, edge);
@@ -232,17 +244,11 @@ const KnowledgeGraph: React.FC = () => {
         });
 
         const graphData: GraphData = {
-          nodes: nodesData.nodes,
+          nodes: Array.from(allNodes.values()),
           edges: Array.from(edgeMap.values())
         };
 
         console.log(`Found ${graphData.nodes.length} nodes and ${graphData.edges.length} edges`);
-        console.log('Edge data:', graphData.edges.map(edge => ({
-          ...edge,
-          sourceNode: graphData.nodes.find(n => n.id === edge.source),
-          targetNode: graphData.nodes.find(n => n.id === edge.target),
-        })));
-
         applyForceLayout(graphData);
       } catch (error) {
         console.error('Error fetching graph data:', error);
