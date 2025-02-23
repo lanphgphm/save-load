@@ -208,7 +208,7 @@ const KnowledgeGraph: React.FC = () => {
         const nodeIdsData = await nodesResponse.json();
         
         console.log('Fetching connections for each node...');
-        const connectionPromises = nodeIdsData.nodes.map(async (nodeId: string) => {
+        const connectionPromises = nodeIdsData.id.map(async (nodeId: string) => {
           const response = await fetch(`/graphs/${nodeId}/connections`, {
             headers: {
               Accept: 'application/json',
