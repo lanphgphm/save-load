@@ -26,7 +26,6 @@ interface ForceNodeData extends d3.SimulationNodeDatum {
   data: NodeData;
 }
 
-// Separate interfaces for the input data and D3 simulation
 interface InputEdge {
   id: string;
   source: string;
@@ -38,18 +37,16 @@ interface GraphData {
   edges: InputEdge[];
 }
 
-// D3 specific link type
 interface SimLink extends d3.SimulationLinkDatum<ForceNodeData> {
   id: string;
 }
 
-// Define default edge options outside component
 const defaultEdgeOptions = {
   style: {
     strokeWidth: 2,
     stroke: '#b1b1b7',
   },
-  type: 'smoothstep', // or 'bezier', 'straight', 'step' depending on your preference
+  type: 'smoothstep',
   animated: false,
   markerEnd: {
     type: MarkerType.ArrowClosed,
@@ -73,13 +70,11 @@ const getDomain = (url: string): string => {
   }
 };
 
-// CustomNode component with guaranteed handles
 const CustomNode: React.FC<{ data: NodeData }> = React.memo(({ data }) => (
   <div
     className="rounded-lg border-2 border-gray-200 p-2 max-w-md relative"
     style={{ backgroundColor: getNodeColor(data.tags) }}
   >
-    {/* Handle for incoming connections */}
     <Handle
       type="target"
       position={Position.Top}
@@ -112,7 +107,6 @@ const CustomNode: React.FC<{ data: NodeData }> = React.memo(({ data }) => (
       </div>
     )}
 
-    {/* Handle for outgoing connections */}
     <Handle
       type="source"
       position={Position.Bottom}
@@ -145,7 +139,6 @@ const KnowledgeGraph: React.FC = () => {
 
   const applyForceLayout = useCallback(
     (graphData: GraphData) => {
-      // Create links array that matches D3's expected format
       const links: SimLink[] = graphData.edges.map((edge) => ({
         id: edge.id,
         source: edge.source,
@@ -176,7 +169,6 @@ const KnowledgeGraph: React.FC = () => {
         },
         data: node.data,
         type: 'default',
-        // Ensure node is connectable
         connectable: true,
       }));
 
@@ -184,7 +176,6 @@ const KnowledgeGraph: React.FC = () => {
         id: edge.id,
         source: String(edge.source),
         target: String(edge.target),
-        // Remove handle specifications to use default connections
         type: 'smoothstep',
         style: {
           stroke: '#b1b1b7',
@@ -206,33 +197,53 @@ const KnowledgeGraph: React.FC = () => {
   useEffect(() => {
     const fetchGraph = async () => {
       try {
-        console.log('Fetching graph data...');
-        const response = await fetch('/graces/graph', {
+        console.log('Fetching all nodes...');
+        const nodesResponse = await fetch('/graphs/nodes', {
           headers: {
             Accept: 'application/json',
             'Content-Type': 'application/json',
           },
           credentials: 'include',
         });
-        const data: GraphData = await response.json();
-        console.log('Raw edge data structure:', JSON.stringify(data.edges, null, 2));
-        console.log('Received graph data:', data);
+        const nodesData = await nodesResponse.json();
 
-        if (!data.nodes || !data.edges) {
-          console.error('Invalid data structure:', data);
-          return;
-        }
+        console.log('Fetching connections for each node...');
+        const edgePromises = nodesData.nodes.map(async (node: ForceNodeData) => {
+          const response = await fetch(`/graphs/${node.id}/connections`, {
+            headers: {
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+          });
+          return response.json();
+        });
 
-        console.log(`Found ${data.nodes.length} nodes and ${data.edges.length} edges`);
-        console.log(
-          'Edge data:',
-          data.edges.map((edge) => ({
-            ...edge,
-            sourceNode: data.nodes.find((n) => n.id === edge.source),
-            targetNode: data.nodes.find((n) => n.id === edge.target),
-          })),
-        );
-        applyForceLayout(data);
+        const connectionsData = await Promise.all(edgePromises);
+
+        const edgeMap = new Map<string, InputEdge>();
+        connectionsData.forEach(data => {
+          data.edges.forEach((edge: InputEdge) => {
+            const edgeKey = `${edge.source}-${edge.target}`;
+            if (!edgeMap.has(edgeKey)) {
+              edgeMap.set(edgeKey, edge);
+            }
+          });
+        });
+
+        const graphData: GraphData = {
+          nodes: nodesData.nodes,
+          edges: Array.from(edgeMap.values())
+        };
+
+        console.log(`Found ${graphData.nodes.length} nodes and ${graphData.edges.length} edges`);
+        console.log('Edge data:', graphData.edges.map(edge => ({
+          ...edge,
+          sourceNode: graphData.nodes.find(n => n.id === edge.source),
+          targetNode: graphData.nodes.find(n => n.id === edge.target),
+        })));
+
+        applyForceLayout(graphData);
       } catch (error) {
         console.error('Error fetching graph data:', error);
       } finally {
@@ -266,12 +277,15 @@ const KnowledgeGraph: React.FC = () => {
         maxZoom={4}
         defaultViewport={{ x: 0, y: 0, zoom: 1 }}
         attributionPosition="bottom-right"
-        connectOnClick={false} // Disable click-to-connect behavior
+        connectOnClick={false}
       >
         <Background />
         <Controls />
         <MiniMap
-          nodeColor={(node: Node<NodeData>) => getNodeColor(node.data.tags)}
+          nodeColor={(node) => {
+            const typedNode = node as Node<NodeData>;
+            return getNodeColor(typedNode.data.tags);
+          }}
           className="bg-white rounded shadow-lg"
         />
       </ReactFlow>
